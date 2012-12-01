@@ -38,17 +38,23 @@ if __name__ == '__main__':
   FI[:,:,1] = np.fft.fft2(S[:,:,1])
   FI[:,:,2] = np.fft.fft2(S[:,:,2])
 
-  Denormin2 = np.power(np.abs(otfFx), 2) + np.power(np.abs(otfFy), 2)
-  Denormin2 = np.tile(Denormin2[:, :, np.newaxis], (1, 1, D))
+  # Compute MTF
+  MTF = np.power(np.abs(otfFx), 2) + np.power(np.abs(otfFy), 2)
+  MTF = np.tile(MTF[:, :, np.newaxis], (1, 1, D))
 
   # Initialize buffers
   h = np.float32(np.zeros((N, M, D)))
   v = np.float32(np.zeros((N, M, D)))
+  dxhp = np.float32(np.zeros((N, M, D)))
+  dyvp = np.float32(np.zeros((N, M, D)))
+  FS = np.complex64(np.zeros((N, M, D)))
 
+  # Iteration settings
   beta_max = 1e5;
   beta = 2 * _lambda
+
+  # Iterate until desired convergence in similarity
   while beta < beta_max:
-    Denormin = 1 + beta * Denormin2;
 
     ### Step 1: estimate (h, v) subproblem
 
@@ -69,21 +75,23 @@ if __name__ == '__main__':
     v[t] = 0
 
     ### Step 2: estimate S subproblem
-    nh1 = h[:,M-1:M,:] - h[:,0:1,:]
-    nh2 = -(np.diff(h, 1, 1))
 
-    nv1 = v[N-1:N,:,:] - v[0:1,:,:]
-    nv2 = -(np.diff(v, 1, 0))
+    # compute dxhp
+    dxhp[:,0:1,:] = h[:,M-1:M,:] - h[:,0:1,:]
+    dxhp[:,1:M,:] = -(np.diff(h, 1, 1))
 
-    Normin2 = np.hstack((nh1, nh2)) + np.vstack((nv1, nv2))
+    # compute dyvp
+    dyvp[0:1,:,:] = v[N-1:N,:,:] - v[0:1,:,:]
+    dyvp[1:N,:,:] = -(np.diff(v, 1, 0))
 
-    FS = np.complex64(np.zeros((N, M, D)))
-    FS[:,:,0] = np.fft.fft2(Normin2[:,:,0])
-    FS[:,:,1] = np.fft.fft2(Normin2[:,:,1])
-    FS[:,:,2] = np.fft.fft2(Normin2[:,:,2])
+    normin = dxhp + dyvp
+    FS[:,:,0] = np.fft.fft2(normin[:,:,0])
+    FS[:,:,1] = np.fft.fft2(normin[:,:,1])
+    FS[:,:,2] = np.fft.fft2(normin[:,:,2])
 
     # solve for S + 1 in Fourier domain
-    FS[:,:,:] = (FI + beta * FS) / Denormin
+    denorm = 1 + beta * MTF;
+    FS[:,:,:] = (FI + beta * FS) / denorm
 
     # inverse FFT to compute S + 1
     S[:,:,0] = np.float32((np.fft.ifft2(FS[:,:,0])).real)
