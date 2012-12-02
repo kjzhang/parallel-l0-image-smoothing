@@ -20,11 +20,8 @@ def cuda_compile(source_string, function_name):
 # Kernel to solve for hp, vp
 hv_kernel_source = \
 """
-#define SUM_RGB(pixel) (pixel.x + pixel.y + pixel.z)
-
 #define SOS_RGB(pixel) (pixel.x * pixel.x + pixel.y * pixel.y + pixel.z * pixel.z)
-
-#define DIFF_PIXELS(a, b) (make_float3(a.x - b.x, a.y - b.y, a.z - b.z))
+#define SUB_PIXELS(a, b) (make_float3(a.x - b.x, a.y - b.y, a.z - b.z))
 
 __global__ void hv_kernel(float3* h, float3* v, float3* S, int Nx, int Ny, float threshold)
 {
@@ -38,8 +35,8 @@ __global__ void hv_kernel(float3* h, float3* v, float3* S, int Nx, int Ny, float
     float3 py = S[x + ((y + 1) % Ny) * Nx];
 
     // compute dxSp and dySp
-    float3 dx = DIFF_PIXELS(px, pc);
-    float3 dy = DIFF_PIXELS(py, pc);
+    float3 dx = SUB_PIXELS(px, pc);
+    float3 dy = SUB_PIXELS(py, pc);
 
     // compute minimum energy E = dxSp^2 + dySp^2
     float delta = SOS_RGB(dx) + SOS_RGB(dy);
@@ -50,7 +47,41 @@ __global__ void hv_kernel(float3* h, float3* v, float3* S, int Nx, int Ny, float
   }
 }
 """
-  
+
+Sa_kernel_source = \
+"""
+#define SUM_RGB(pixel) (pixel.x + pixel.y + pixel.z)
+#define SOS_RGB(pixel) (pixel.x * pixel.x + pixel.y * pixel.y + pixel.z * pixel.z)
+
+#define ADD_PIXELS(a, b) (make_float3(a.x + b.x, a.y + b.y, a.z + b.z))
+#define SUB_PIXELS(a, b) (make_float3(a.x - b.x, a.y - b.y, a.z - b.z))
+
+__global__ void Sa_kernel(float* R, float* G, float* B, float3* h, float3* v, int Nx, int Ny)
+{
+  int x = blockDim.x * blockIdx.x + threadIdx.x;
+  int y = blockDim.y * blockIdx.y + threadIdx.y;
+
+  if (x < Nx && y < Ny) {
+    // find relevant pixels
+    float3 ph = h[x + y * Nx];
+    float3 dhx = h[((Nx + x - 1) % Nx) + y * Nx];
+
+    float3 pv = v[x + y * Nx];
+    float3 dvy = v[x + ((Ny + y - 1) % Ny) * Nx];
+
+    // compute dxhp and dyvp
+    float3 dx = SUB_PIXELS(dhx, ph);
+    float3 dy = SUB_PIXELS(dvy, pv);
+
+    // compute sum and split into channels
+    float3 sum = ADD_PIXELS(dx, dy);
+    R[x + y * Nx] = sum.x;
+    G[x + y * Nx] = sum.y;
+    B[x + y * Nx] = sum.z;
+  }
+}
+"""
+
 # Image File Path
 image_file = "flower.jpg"
 
@@ -61,6 +92,7 @@ _lambda = 2e-2;
 if __name__ == '__main__':
   ### Initialize CUDA kernels
   hv_kernel = cuda_compile(hv_kernel_source, "hv_kernel")
+  Sa_kernel = cuda_compile(Sa_kernel_source, "Sa_kernel")
 
   # Read image I
   image = cv2.imread(image_file)
@@ -147,23 +179,12 @@ if __name__ == '__main__':
     e_time = time.time()
     print "--time: %f (s)" % (e_time - s_time)
 
-    h = h_d.get()
-    v = v_d.get()
-
     ### Step 2: estimate S subproblem
+    Sa_kernel(RR_d, RG_d, RB_d, h_d, v_d, Nx, Ny, block=blocksize, grid=gridsize)
 
-    # compute dxhp
-    dxhp[:,0:1,:] = h[:,M-1:M,:] - h[:,0:1,:]
-    dxhp[:,1:M,:] = -(np.diff(h, 1, 1))
-
-    # compute dyvp
-    dyvp[0:1,:,:] = v[N-1:N,:,:] - v[0:1,:,:]
-    dyvp[1:N,:,:] = -(np.diff(v, 1, 0))
-
-    normin = dxhp + dyvp
-    FS[:,:,0] = np.fft.fft2(normin[:,:,0])
-    FS[:,:,1] = np.fft.fft2(normin[:,:,1])
-    FS[:,:,2] = np.fft.fft2(normin[:,:,2])
+    FS[:,:,0] = np.fft.fft2(RR_d.get())
+    FS[:,:,1] = np.fft.fft2(RG_d.get())
+    FS[:,:,2] = np.fft.fft2(RB_d.get())
 
     # solve for S + 1 in Fourier domain
     denorm = 1 + beta * MTF;
