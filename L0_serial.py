@@ -58,6 +58,10 @@ if __name__ == '__main__':
 
     ### Step 1: estimate (h, v) subproblem
 
+    # start time
+    print "-subproblem 1: estimate (h,v)"
+    s_sp1 = time.time()
+
     # compute dxSp
     h[:,0:M-1,:] = np.diff(S, 1, 1)
     h[:,M-1:M,:] = S[:,0:1,:] - S[:,M-1:M,:]
@@ -73,6 +77,10 @@ if __name__ == '__main__':
     # compute piecewise solution for hp, vp
     h[t] = 0
     v[t] = 0
+
+    # end time
+    e_sp1 = time.time()
+    print "--time: %f (s)" % (e_sp1 - s_sp1)
 
     ### Step 2: estimate S subproblem
 
@@ -102,5 +110,4 @@ if __name__ == '__main__':
 
     print "."
 
-  cv2.imwrite("out.png", S * 256)
-
+  cv2.imwrite("out_serial.png", S * 256)

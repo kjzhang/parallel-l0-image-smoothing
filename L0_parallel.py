@@ -6,12 +6,9 @@ import time
 # Import User Libraries
 import L0_helpers
 
-# Import PyCUDA
+# Import PyCUDA and initialize device
 import pycuda.compiler as nvcc
 import pycuda.gpuarray as gpu
-import pycuda.driver as cu
-
-# Initialize the CUDA device
 import pycuda.autoinit
 
 def cuda_compile(source_string, function_name):
@@ -20,24 +17,33 @@ def cuda_compile(source_string, function_name):
   # Return a handle to the compiled CUDA kernel
   return source_module.get_function(function_name)
 
-# Kernel for Step 1
-diff_kernel_source = \
+# Kernel to solve for hp, vp
+hv_kernel_source = \
 """
-__global__ void diff_kernel(int N, int M, int* h, int*v, int* S)
+#define SUM_RGB(pixel) (pixel.x + pixel.y + pixel.z)
+
+#define SOS_RGB(pixel) (pixel.x * pixel.x + pixel.y * pixel.y + pixel.z * pixel.z)
+
+#define DIFF_PIXELS(a, b) (make_float3(a.x - b.x, a.y - b.y, a.z - b.z))
+
+__global__ void hv_kernel(float3* h, float3* v, float3* S, int Nx, int Ny, float threshold)
 {
-  int x = blockDim.x*blockIdx.x + threadIdx.x;
-  int y = blockDim.y*blockIdx.y + threadIdx.y;
-  int tid = x + y*M;
+  int x = blockDim.x * blockIdx.x + threadIdx.x;
+  int y = blockDim.y * blockIdx.y + threadIdx.y;
 
-  if(x < M-1)
-    h[tid] = S[tid+1] - S[tid];
-  else
-    h[tid] = S[y*M] - S[tid];
+  if (x < Nx && y < Ny) {
+    float3 pc = S[x + y * Nx];
+    float3 px = S[((x + 1) % Nx) + y * Nx];
+    float3 py = S[x + ((y + 1) % Ny) * Nx];
 
-  if(y < N-1)
-    result[tid] = S[tid+M] - S[tid];
-  else
-    result[tid] = S[x] - S[tid];
+    float3 dx = DIFF_PIXELS(px, pc);
+    float3 dy = DIFF_PIXELS(py, pc);
+
+    float delta = SOS_RGB(dx) + SOS_RGB(dy);
+
+    h[x + y * Nx] = delta < threshold ? make_float3(0.0, 0.0, 0.0) : dx;
+    v[x + y * Nx] = delta < threshold ? make_float3(0.0, 0.0, 0.0) : dy;
+  }
 }
 """
   
@@ -49,6 +55,9 @@ kappa = 2.0;
 _lambda = 2e-2;
 
 if __name__ == '__main__':
+  ### Initialize CUDA kernels
+  hv_kernel = cuda_compile(hv_kernel_source, "hv_kernel")
+
   # Read image I
   image = cv2.imread(image_file)
 
@@ -80,9 +89,16 @@ if __name__ == '__main__':
   # Initialize buffers
   h = np.float32(np.zeros((N, M, D)))
   v = np.float32(np.zeros((N, M, D)))
+
   dxhp = np.float32(np.zeros((N, M, D)))
   dyvp = np.float32(np.zeros((N, M, D)))
   FS = np.complex64(np.zeros((N, M, D)))
+
+  channel = np.float32(np.zeros((N, M)))
+
+  S_d = gpu.to_gpu(S)
+  h_d = gpu.to_gpu(h)
+  v_d = gpu.to_gpu(v)
 
   # Iteration settings
   beta_max = 1e5;
@@ -91,31 +107,31 @@ if __name__ == '__main__':
   # Iterate until desired convergence in similarity
   while beta < beta_max:
 
-    ### Step 1: estimate (h, v) subproblem
-
-    # kernels
-    diff_kernel = cuda_compile(diff_kernel_source, "diff_kernel")
-
-    # allocate memory
-    h_d = gpu.to_gpu(h)
-    v_d = gpu.to_gpu(v)
     S_d = gpu.to_gpu(S)
 
-    # block and grid size
-    blocksize = (32, 32, 1)
-    gridsize  = (int(M*1.0/32+1), int(N*1.0/32+1))
+    ### Step 1: estimate (h, v) subproblem
 
-    # compute dxSp and dySp
-    diff_h_kernel(np.int32(N), np.int32(M), h_d, v_d, S_d)
-
-    # compute minimum energy E = dxSp^2 + dySp^2 <= _lambda/beta
-    t = np.sum(np.power(h, 2) + np.power(v, 2), axis=2) < _lambda / beta
-    t = np.tile(t[:, :, np.newaxis], (1, 1, 3))
+    # kernel block and grid size
+    Nx, Ny = M, N
+    x_tpb = 32
+    y_tpb = 8
+    x_blocks = int(np.ceil(Nx * 1.0/x_tpb))
+    y_blocks = int(np.ceil(Ny * 1.0/y_tpb))
+    blocksize = (x_tpb, y_tpb, 1)
+    gridsize  = (x_blocks, y_blocks)
 
     # compute piecewise solution for hp, vp
-    h[t] = 0
-    v[t] = 0
+    print "-subproblem 1: estimate (h,v)"
+    s_sp1 = time.time()
 
+    threshold = np.float32(_lambda / beta)
+    hv_kernel(h_d, v_d, S_d, Nx, Ny, threshold, block=blocksize, grid=gridsize)
+
+    h = h_d.get()
+    v = v_d.get()
+
+    e_sp1 = time.time()
+    print "--time: %f (s)" % (e_sp1 - s_sp1)
 
     ### Step 2: estimate S subproblem
 
@@ -145,5 +161,5 @@ if __name__ == '__main__':
 
     print "."
 
-  cv2.imwrite("out.png", S * 256)
+  cv2.imwrite("out_parallel.png", S * 256)
   
