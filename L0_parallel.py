@@ -32,17 +32,21 @@ __global__ void hv_kernel(float3* h, float3* v, float3* S, int Nx, int Ny, float
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 
   if (x < Nx && y < Ny) {
+    // find relevant pixels
     float3 pc = S[x + y * Nx];
     float3 px = S[((x + 1) % Nx) + y * Nx];
     float3 py = S[x + ((y + 1) % Ny) * Nx];
 
+    // compute dxSp and dySp
     float3 dx = DIFF_PIXELS(px, pc);
     float3 dy = DIFF_PIXELS(py, pc);
 
+    // compute minimum energy E = dxSp^2 + dySp^2
     float delta = SOS_RGB(dx) + SOS_RGB(dy);
 
-    h[x + y * Nx] = delta < threshold ? make_float3(0.0, 0.0, 0.0) : dx;
-    v[x + y * Nx] = delta < threshold ? make_float3(0.0, 0.0, 0.0) : dy;
+    // compute piecewise solution for h,v: find where E <= _lambda/beta
+    h[x + y * Nx] = delta > threshold ? dx : make_float3(0.0, 0.0, 0.0);
+    v[x + y * Nx] = delta > threshold ? dy : make_float3(0.0, 0.0, 0.0);
   }
 }
 """
@@ -94,11 +98,22 @@ if __name__ == '__main__':
   dyvp = np.float32(np.zeros((N, M, D)))
   FS = np.complex64(np.zeros((N, M, D)))
 
-  channel = np.float32(np.zeros((N, M)))
+  r_channel = np.float32(np.zeros((N, M)))
+  c_channel = np.complex64(np.zeros((N, M)))
 
-  S_d = gpu.to_gpu(S)
-  h_d = gpu.to_gpu(h)
-  v_d = gpu.to_gpu(v)
+  # Allocate memory on disk
+  S_d = gpu.to_gpu(S)               # 3-channel Sp
+
+  h_d = gpu.to_gpu(h)               # 3-channel hp
+  v_d = gpu.to_gpu(v)               # 3-channel vp
+
+  RR_d = gpu.to_gpu(r_channel)      # 1-channel real
+  RG_d = gpu.to_gpu(r_channel)
+  RB_d = gpu.to_gpu(r_channel)
+
+  CR_d = gpu.to_gpu(c_channel)      # 1-channel complex
+  CG_d = gpu.to_gpu(c_channel)
+  CB_d = gpu.to_gpu(c_channel)
 
   # Iteration settings
   beta_max = 1e5;
@@ -120,18 +135,20 @@ if __name__ == '__main__':
     blocksize = (x_tpb, y_tpb, 1)
     gridsize  = (x_blocks, y_blocks)
 
-    # compute piecewise solution for hp, vp
+    # subproblem 1 start time
     print "-subproblem 1: estimate (h,v)"
-    s_sp1 = time.time()
+    s_time = time.time()
 
+    # compute piecewise solution for hp, vp
     threshold = np.float32(_lambda / beta)
     hv_kernel(h_d, v_d, S_d, Nx, Ny, threshold, block=blocksize, grid=gridsize)
 
+    # subproblem 1 end time
+    e_time = time.time()
+    print "--time: %f (s)" % (e_time - s_time)
+
     h = h_d.get()
     v = v_d.get()
-
-    e_sp1 = time.time()
-    print "--time: %f (s)" % (e_sp1 - s_sp1)
 
     ### Step 2: estimate S subproblem
 
@@ -162,4 +179,4 @@ if __name__ == '__main__':
     print "."
 
   cv2.imwrite("out_parallel.png", S * 256)
-  
+
