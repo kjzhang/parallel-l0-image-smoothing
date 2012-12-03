@@ -84,11 +84,11 @@ __global__ void Sa_kernel(cuFloatComplex* R, cuFloatComplex* G, cuFloatComplex* 
 }
 """
 
-merge_real_kernel_source = \
+merge_r_kernel_source = \
 """
 #import <cuComplex.h>
 
-__global__ void merge_real_kernel(float3* S, cuFloatComplex* R, cuFloatComplex* G, cuFloatComplex* B, int Nx, int Ny)
+__global__ void merge_r_kernel(float3* S, cuFloatComplex* R, cuFloatComplex* G, cuFloatComplex* B, int Nx, int Ny)
 {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
@@ -102,7 +102,6 @@ __global__ void merge_real_kernel(float3* S, cuFloatComplex* R, cuFloatComplex* 
     S[x + y * Nx] = make_float3(r.x, g.x, b.x);
   }
 }
-
 """
 
 # Image File Path
@@ -124,10 +123,10 @@ if __name__ == '__main__':
   ### Compile and initialize CUDA kernels and FFT plans
   hv_kernel = cuda_compile(hv_kernel_source, "hv_kernel")
   Sa_kernel = cuda_compile(Sa_kernel_source, "Sa_kernel")
-  merge_real_kernel = cuda_compile(merge_real_kernel_source, "merge_real_kernel")
+  merge_r_kernel = cuda_compile(merge_r_kernel_source, "merge_r_kernel")
   plan = cu_fft.Plan((N, M), np.complex64, np.complex64)
 
-  # Initialize S as I
+  # Initialize S with I and normalize RGB values
   S = np.float32(image) / 256
 
   # Initialize buffers
@@ -184,7 +183,7 @@ if __name__ == '__main__':
     # kernel block and grid size
     Nx, Ny = np.int32(M), np.int32(N)
     x_tpb = 32
-    y_tpb = 8
+    y_tpb = 16
     x_blocks = int(np.ceil(Nx * 1.0/x_tpb))
     y_blocks = int(np.ceil(Ny * 1.0/y_tpb))
     blocksize = (x_tpb, y_tpb, 1)
@@ -203,6 +202,10 @@ if __name__ == '__main__':
     print "--time: %f (s)" % (e_time - s_time)
 
     ### Step 2: estimate S subproblem
+
+    # subproblem 2 start time
+    print "-subproblem 2: estimate S + 1"
+    s_time = time.time()
 
     # solve for S delta in Fourier domain
     Sa_kernel(FFTiR_d, FFTiG_d, FFTiB_d, h_d, v_d, Nx, Ny, block=blocksize, grid=gridsize)
@@ -226,7 +229,11 @@ if __name__ == '__main__':
     cu_fft.ifft(FFTiR_d, FFToR_d, plan, scale=True)
     cu_fft.ifft(FFTiG_d, FFToG_d, plan, scale=True)
     cu_fft.ifft(FFTiB_d, FFToB_d, plan, scale=True)
-    merge_real_kernel(S_d, FFToR_d, FFToG_d, FFToB_d, Nx, Ny, block=blocksize, grid=gridsize)
+    merge_r_kernel(S_d, FFToR_d, FFToG_d, FFToB_d, Nx, Ny, block=blocksize, grid=gridsize)
+
+    # subproblem 2 end time
+    e_time = time.time()
+    print "--time: %f (s)" % (e_time - s_time)
 
     # update beta for next iteration
     beta *= kappa
