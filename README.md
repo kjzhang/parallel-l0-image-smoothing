@@ -5,7 +5,7 @@
 * Kevin Zhang : kzhang@college.harvard.edu
 * Han He : han.he@college.harvard.edu
 
-The project is created based on the method described in the following paper: "Image Smoothing via L0 Gradient Minimization", Li Xu, Cewu Lu, Yi Xu, Jiayi Jia, ACM Transcations on Graphics, (SIGGRAPH Asia 2011), 2011.
+Our final project is created based on the image smoothing method described in the following paper: "Image Smoothing via L0 Gradient Minimization", Li Xu, Cewu Lu, Yi Xu, Jiayi Jia, ACM Transcations on Graphics, (SIGGRAPH Asia 2011), 2011.
 
 ### Dependencies: ###
 * numpy 1.6.2
