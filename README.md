@@ -12,3 +12,6 @@ Our final project is created based on the image smoothing method described in th
 * pycuda 2012.1
 * scikits.cuda 0.041
 * cv2 2.4.3-rc
+
+### Sample Images: ###
+* [flowers](http://andrewfletcher.deviantart.com/art/Bunch-of-Flowers-294042509)
