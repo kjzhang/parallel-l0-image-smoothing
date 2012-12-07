@@ -11,8 +11,6 @@ import pycuda.compiler as nvcc
 import pycuda.gpuarray as gpu
 import pycuda.autoinit
 
-from pycuda.elementwise import ElementwiseKernel
-
 # Import scikits.cuda for CUDA FFT capabilities
 import scikits.cuda.fft as cu_fft
 
@@ -182,7 +180,6 @@ if __name__ == '__main__':
   # Compute MTF
   MTF = np.power(np.abs(otfFx), 2) + np.power(np.abs(otfFy), 2)
   MTF_d = gpu.to_gpu(np.array(MTF, np.complex64))
-  MTF = np.tile(MTF[:, :, np.newaxis], (1, 1, D))
 
   ### Allocate memory on GPU
 
