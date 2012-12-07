@@ -136,7 +136,7 @@ __global__ void merge_r_kernel(float3* S, cuFloatComplex* R, cuFloatComplex* G, 
 """
 
 # Image File Path
-image_file = "building-huge.jpg"
+image_file = "images/flowers_5.jpg"
 
 # L0 minimization parameters
 kappa = 2.0;
