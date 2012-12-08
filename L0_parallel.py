@@ -289,7 +289,6 @@ if __name__ == '__main__':
     ### Step 1: estimate (h, v) subproblem
 
     # subproblem 1 start time
-    print "-subproblem 1: estimate (h,v)"
     s_time = time.time()
 
     # compute piecewise solution for hp, vp
@@ -299,12 +298,12 @@ if __name__ == '__main__':
     # subproblem 1 end time
     e_time = time.time()
     step_1 = step_1 + e_time - s_time
+    print "-subproblem 1: estimate (h,v)"
     print "--time: %f (s)" % (e_time - s_time)
 
     ### Step 2: estimate S subproblem
 
     # subproblem 2 start time
-    print "-subproblem 2: estimate S + 1"
     s_time = time.time()
 
     # find S delta in original domain
@@ -340,13 +339,13 @@ if __name__ == '__main__':
     # subproblem 2 end time
     e_time = time.time()
     step_2 =  step_2 + e_time - s_time
+    print "-subproblem 2: estimate S + 1"
     print "--time: %f (s)" % (e_time - s_time)
+    print ""
 
     # update beta for next iteration
     beta *= kappa
     iteration += 1
-
-    print ""
 
   # Clean up handle to FFT plan
   del plan
