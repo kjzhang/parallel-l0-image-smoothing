@@ -8,15 +8,34 @@ import time
 import L0_helpers
 
 # Image File Path
-image_file = "images/flowers_3.jpg"
+image_r = "images/flowers.jpg"
+image_w = "out_serial.png"
 
 # L0 minimization parameters
 kappa = 2.0;
 _lambda = 2e-2;
 
 if __name__ == '__main__':
+  # Parse arguments
+  parser = argparse.ArgumentParser(
+      description="Serial implementation of image smoothing via L0 gradient minimization")
+  parser.add_argument('image_r', help="input image file")
+  parser.add_argument('image_w', help="output image file")
+  parser.add_argument('-k', type=float, default=2.0,
+      metavar='kappa', help='updating weight (default 2.0)')
+  parser.add_argument('-l', type=float, default=2e-2,
+      metavar='lambda', help='smoothing weight (default 2e-2)')
+  args = parser.parse_args()
+
+  # Set parameters
+  kappa = args.k
+  _lambda = args.l
+
+  image_r = args.image_r
+  image_w = args.image_w
+
   # Read image I
-  image = cv2.imread(image_file)
+  image = cv2.imread(image_r)
 
   # Timers
   step_1 = 0.0
@@ -141,6 +160,9 @@ if __name__ == '__main__':
 
     print ""
 
+  # Rescale image
+  S = S * 256
+
   # Total end time
   final_time = time.time()
 
@@ -151,4 +173,4 @@ if __name__ == '__main__':
   print "Step 2 (FFT): %f (s)" % (step_2_fft)
   print "Iterations: %d" % (iteration)
 
-  cv2.imwrite("out_serial.png", S * 256)
+  cv2.imwrite(image_w, S)

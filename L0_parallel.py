@@ -1,6 +1,7 @@
 # Import Libraries
 import numpy as np
 import cv2
+import argparse
 import time
 
 # Import User Libraries
@@ -157,15 +158,34 @@ __global__ void merge_r_kernel(float3* S, cuFloatComplex* R, cuFloatComplex* G, 
 """
 
 # Image File Path
-image_file = "images/flowers_5.jpg"
+image_r = "images/flowers.jpg"
+image_w = "out_serial.png"
 
 # L0 minimization parameters
 kappa = 2.0;
 _lambda = 2e-2;
 
 if __name__ == '__main__':
+  # Parse arguments
+  parser = argparse.ArgumentParser(
+      description="Parallel implementation of image smoothing via L0 gradient minimization")
+  parser.add_argument('image_r', help="input image file")
+  parser.add_argument('image_w', help="output image file")
+  parser.add_argument('-k', type=float, default=2.0,
+      metavar='kappa', help='updating weight (default 2.0)')
+  parser.add_argument('-l', type=float, default=2e-2,
+      metavar='lambda', help='smoothing weight (default 2e-2)')
+  args = parser.parse_args()
+
+  # Set parameters
+  kappa = args.k
+  _lambda = args.l
+
+  image_r = args.image_r
+  image_w = args.image_w
+
   # Read image I
-  image = cv2.imread(image_file)
+  image = cv2.imread(image_r)
 
   # Timers
   step_1 = 0.0
@@ -345,5 +365,5 @@ if __name__ == '__main__':
   print "Iterations: %d" % (iteration)
 
   # Write image output to file
-  cv2.imwrite("out_parallel.png", final)
+  cv2.imwrite(image_w, final)
 
