@@ -20,6 +20,27 @@ def cuda_compile(source_string, function_name):
   # Return a handle to the compiled CUDA kernel
   return source_module.get_function(function_name)
 
+mtf_kernel_source = \
+"""
+#include <cuComplex.h>
+
+__global__ void mtf_kernel(cuFloatComplex* z, cuFloatComplex* a, cuFloatComplex* b, int Nx, int Ny)
+{
+  int x = blockDim.x * blockIdx.x + threadIdx.x;
+  int y = blockDim.y * blockIdx.y + threadIdx.y;
+  int index = x + y * Nx;
+
+  if (x < Nx && y < Ny) {
+    cuFloatComplex pa = a[index];
+    cuFloatComplex pb = b[index];
+
+    z[index] = make_cuFloatComplex(pa.x * pa.x + pa.y * pa.y +
+                                   pb.x * pb.x + pb.y * pb.y,
+                                   0);
+  }
+}
+"""
+
 # Kernel to solve for hp, vp
 hv_kernel_source = \
 """
@@ -146,8 +167,13 @@ if __name__ == '__main__':
   # Read image I
   image = cv2.imread(image_file)
 
-  # Total time start
-  s_total = time.time()
+  # Timers
+  step_1 = 0.0
+  step_2 = 0.0
+  step_2_fft = 0.0
+
+  # Start time
+  start_time = time.time()
 
   # Validate image format
   N, M, D = image.shape
@@ -155,6 +181,7 @@ if __name__ == '__main__':
   print "Processing %d x %d RGB image" % (M, N)
 
   ### Compile and initialize CUDA kernels and FFT plans
+  mtf_kernel = cuda_compile(mtf_kernel_source, "mtf_kernel")
   hv_kernel = cuda_compile(hv_kernel_source, "hv_kernel")
   Sa_kernel = cuda_compile(Sa_kernel_source, "Sa_kernel")
   Sb_kernel = cuda_compile(Sb_kernel_source, "Sb_kernel")
@@ -162,13 +189,52 @@ if __name__ == '__main__':
   merge_r_kernel = cuda_compile(merge_r_kernel_source, "merge_r_kernel")
   plan = cu_fft.Plan((N, M), np.complex64, np.complex64)
 
+  ### CUDA kernel settings
+  Nx, Ny = np.int32(M), np.int32(N)
+  x_tpb = 32
+  y_tpb = 16
+  x_blocks = int(np.ceil(Nx * 1.0/x_tpb))
+  y_blocks = int(np.ceil(Ny * 1.0/y_tpb))
+  blocksize = (x_tpb, y_tpb, 1)
+  gridsize  = (x_blocks, y_blocks)
+
   # Initialize S with I and normalize RGB values
   S = np.float32(image) / 256
 
-  # Initialize buffers on host
-  channel3r = np.float32(np.zeros((N, M, D)))
-  channel1c = np.complex64(np.zeros((N, M)))
-  FS = np.complex64(np.zeros((N, M, D)))
+  ### Allocate memory on GPU
+
+  # Channel dimensions
+  c1 = (N, M)
+  c3 = (N, M, D)
+
+  # I, S images
+  S_d = gpu.to_gpu(S)                        # 3-channel real S
+  FS_d = gpu.GPUArray(c3, np.complex64)      # 3-channel complex FS
+
+  FIR_d = gpu.GPUArray(c1, np.complex64)     # 1-channel complex FI
+  FIG_d = gpu.GPUArray(c1, np.complex64)
+  FIB_d = gpu.GPUArray(c1, np.complex64)
+
+  MTF_d = gpu.GPUArray(c1, np.complex64)     # 1-channel complex MTF
+
+  # h, v estimators for dxSp, dySp
+  h_d = gpu.GPUArray(c3, np.float32)         # 3-channel real hp
+  v_d = gpu.GPUArray(c3, np.float32)         # 3-channel real vp
+
+  # normalizing denominator
+  d_d = gpu.GPUArray(c1, np.complex64)       # 1-channel complex d
+
+  # input / output for CUDA FFT
+  FFToR_d = gpu.GPUArray(c1, np.complex64)   # 1-channel complex FFT
+  FFToG_d = gpu.GPUArray(c1, np.complex64)
+  FFToB_d = gpu.GPUArray(c1, np.complex64)
+
+  # initially load starting image I for CUDA FFT
+  FFTiR_d = gpu.to_gpu(np.array(S[:,:,0], dtype=np.complex64))
+  FFTiG_d = gpu.to_gpu(np.array(S[:,:,1], dtype=np.complex64))
+  FFTiB_d = gpu.to_gpu(np.array(S[:,:,2], dtype=np.complex64))
+
+  ### Initial Computation
 
   # Compute image OTF
   size_2D = [N, M]
@@ -178,54 +244,22 @@ if __name__ == '__main__':
   otfFy = L0_helpers.psf2otf(fy, size_2D)
 
   # Compute MTF
-  MTF = np.power(np.abs(otfFx), 2) + np.power(np.abs(otfFy), 2)
-  MTF_d = gpu.to_gpu(np.array(MTF, np.complex64))
+  otfFx_d = gpu.to_gpu(otfFx)
+  otfFy_d = gpu.to_gpu(otfFy)
+  mtf_kernel(MTF_d, otfFx_d, otfFy_d, Nx, Ny, block=blocksize, grid=gridsize)
 
-  ### Allocate memory on GPU
-
-  # I, S images
-  FS_d = gpu.to_gpu(FS)             # 3-channel complex FS
-  S_d = gpu.to_gpu(S)               # 3-channel real Sp
-
-  FIR_d = gpu.to_gpu(channel1c)     # 1-channel complex FI
-  FIG_d = gpu.to_gpu(channel1c)
-  FIB_d = gpu.to_gpu(channel1c)
-
-  # h, v estimators for dxSp, dySp
-  h_d = gpu.to_gpu(channel3r)       # 3-channel real hp
-  v_d = gpu.to_gpu(channel3r)       # 3-channel real vp
-
-  # normalizing denominator
-  d_d = gpu.to_gpu(channel1c)       # 1-channel complex d
-
-  # input / output for CUDA FFT
-  FFToR_d = gpu.to_gpu(channel1c)   # 1-channel complex FFT
-  FFToG_d = gpu.to_gpu(channel1c)
-  FFToB_d = gpu.to_gpu(channel1c)
-
-  # initially load starting image I for CUDA FFT
-  FFTiR_d = gpu.to_gpu(np.array(S[:,:,0], dtype=np.complex64))
-  FFTiG_d = gpu.to_gpu(np.array(S[:,:,1], dtype=np.complex64))
-  FFTiB_d = gpu.to_gpu(np.array(S[:,:,2], dtype=np.complex64))
-
-  ### Compute Fourier transform of original image 
+  # Compute Fourier transform of original image 
   cu_fft.fft(FFTiR_d, FIR_d, plan)
   cu_fft.fft(FFTiG_d, FIG_d, plan)
   cu_fft.fft(FFTiB_d, FIB_d, plan)
-
-  ## CUDA kernel settings
-  Nx, Ny = np.int32(M), np.int32(N)
-  x_tpb = 32
-  y_tpb = 16
-  x_blocks = int(np.ceil(Nx * 1.0/x_tpb))
-  y_blocks = int(np.ceil(Ny * 1.0/y_tpb))
-  blocksize = (x_tpb, y_tpb, 1)
-  gridsize  = (x_blocks, y_blocks)
 
   ### Iteration settings
   beta_max = 1e5
   beta = 2 * _lambda
   iteration = 0
+
+  # Done initializing  
+  init_time = time.time()
 
   ### Iterate until desired convergence in similarity
   while beta < beta_max:
@@ -244,6 +278,7 @@ if __name__ == '__main__':
 
     # subproblem 1 end time
     e_time = time.time()
+    step_1 = step_1 + e_time - s_time
     print "--time: %f (s)" % (e_time - s_time)
 
     ### Step 2: estimate S subproblem
@@ -256,9 +291,12 @@ if __name__ == '__main__':
     Sa_kernel(FFTiR_d, FFTiG_d, FFTiB_d, h_d, v_d, Nx, Ny, block=blocksize, grid=gridsize)
 
     # find S delta in Fourier domain in each color channel
+    fft_s = time.time()
     cu_fft.fft(FFTiR_d, FFToR_d, plan)
     cu_fft.fft(FFTiG_d, FFToG_d, plan)
     cu_fft.fft(FFTiB_d, FFToB_d, plan)
+    fft_e = time.time()
+    step_2_fft += fft_e - fft_s
 
     # solve for normalizing denominator
     d_kernel(d_d, MTF_d, np.float32(beta), Nx, Ny, block=blocksize, grid=gridsize)
@@ -269,15 +307,19 @@ if __name__ == '__main__':
     Sb_kernel(FFTiB_d, FIB_d, FFToB_d, d_d, np.float32(beta), Nx, Ny, block=blocksize, grid=gridsize)
 
     # inverse FFT to compute S + 1 in each color channel
+    fft_s = time.time()
     cu_fft.ifft(FFTiR_d, FFToR_d, plan, scale=True)
     cu_fft.ifft(FFTiG_d, FFToG_d, plan, scale=True)
     cu_fft.ifft(FFTiB_d, FFToB_d, plan, scale=True)
+    fft_e = time.time()
+    step_2_fft += fft_e - fft_s
 
     # merge real components of 3 complex color channels
     merge_r_kernel(S_d, FFToR_d, FFToG_d, FFToB_d, Nx, Ny, block=blocksize, grid=gridsize)
 
     # subproblem 2 end time
     e_time = time.time()
+    step_2 =  step_2 + e_time - s_time
     print "--time: %f (s)" % (e_time - s_time)
 
     # update beta for next iteration
@@ -293,8 +335,14 @@ if __name__ == '__main__':
   final = S_d.get() * 256
 
   # Total end time
-  e_total = time.time()
-  print "Parallel Time: %f" % (e_total - s_total)
+  final_time = time.time()
+
+  print "Total Time: %f (s)" % (final_time - start_time)
+  print "Setup: %f (s)" % (init_time - start_time)
+  print "Step 1: %f (s)" % (step_1)
+  print "Step 2: %f (s)" % (step_2)
+  print "Step 2 (FFT): %f (s)" % (step_2_fft)
+  print "Iterations: %d" % (iteration)
 
   # Write image output to file
   cv2.imwrite("out_parallel.png", final)

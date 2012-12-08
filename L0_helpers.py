@@ -3,6 +3,18 @@ import math
 
 # Convert point-spread function to optical transfer function
 def psf2otf(psf, outSize=None):
+  # Prepare psf for conversion
+  data = prepare_psf(psf, outSize)
+
+  # Compute the OTF
+  otf = np.fft.fftn(data)
+
+  return np.complex64(otf)
+
+def prepare_psf(psf, outSize=None, dtype=None):
+  if not dtype:
+    dtype=np.float32
+
   psf = np.float32(psf)
 
   # Determine PSF / OTF shapes
@@ -12,7 +24,7 @@ def psf2otf(psf, outSize=None):
   outSize = np.int32(outSize)
 
   # Pad the PSF to outSize
-  new_psf = np.float32(np.zeros(outSize))
+  new_psf = np.zeros(outSize, dtype=dtype)
   new_psf[:psfSize[0],:psfSize[1]] = psf[:,:]
   psf = new_psf
 
@@ -20,10 +32,7 @@ def psf2otf(psf, outSize=None):
   shift = -(psfSize / 2)
   psf = circshift(psf, shift)
 
-  # Compute the OTF
-  otf = np.fft.fftn(psf)
-
-  return np.complex64(otf)
+  return psf
 
 # Circularly shift array
 def circshift(A, shift):
