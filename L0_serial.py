@@ -15,6 +15,9 @@ image_w = "out_serial.png"
 kappa = 2.0;
 _lambda = 2e-2;
 
+# Verbose output
+verbose = False;
+
 if __name__ == '__main__':
   # Parse arguments
   parser = argparse.ArgumentParser(
@@ -25,6 +28,8 @@ if __name__ == '__main__':
       metavar='kappa', help='updating weight (default 2.0)')
   parser.add_argument('-l', type=float, default=2e-2,
       metavar='lambda', help='smoothing weight (default 2e-2)')
+  parser.add_argument('-v', '--verbose', action='store_true',
+      help='enable verbose logging for each iteration')
   args = parser.parse_args()
 
   # Set parameters
@@ -33,6 +38,8 @@ if __name__ == '__main__':
 
   image_r = args.image_r
   image_w = args.image_w
+
+  verbose = args.verbose
 
   # Read image I
   image = cv2.imread(image_r)
@@ -88,7 +95,8 @@ if __name__ == '__main__':
   # Iterate until desired convergence in similarity
   while beta < beta_max:
 
-    print "ITERATION %i" % iteration
+    if verbose:
+      print "ITERATION %i" % iteration
 
     ### Step 1: estimate (h, v) subproblem
 
@@ -114,8 +122,9 @@ if __name__ == '__main__':
     # subproblem 1 end time
     e_time = time.time()
     step_1 = step_1 + e_time - s_time
-    print "-subproblem 1: estimate (h,v)"
-    print "--time: %f (s)" % (e_time - s_time)
+    if verbose:
+      print "-subproblem 1: estimate (h,v)"
+      print "--time: %f (s)" % (e_time - s_time)
 
     ### Step 2: estimate S subproblem
 
@@ -151,9 +160,10 @@ if __name__ == '__main__':
     # subproblem 2 end time
     e_time = time.time()
     step_2 =  step_2 + e_time - s_time
-    print "-subproblem 2: estimate S + 1"
-    print "--time: %f (s)" % (e_time - s_time)
-    print ""
+    if verbose:
+      print "-subproblem 2: estimate S + 1"
+      print "--time: %f (s)" % (e_time - s_time)
+      print ""
 
     # update beta for next iteration
     beta *= kappa
