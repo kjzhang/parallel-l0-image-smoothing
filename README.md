@@ -25,9 +25,13 @@ Alternatively, `virtualenv` from the `packages/epd/7.3-1` module an be used to c
 
 ### Source Code: ###
 
+[Project GitHub](https://github.com/kjzhang/kzhang-cs205-l0-smoothing)
+
 * `L0_serial.py`: serial implementation using CPU
 * `L0_parallel.py`: parallel implementation mainly using GPU + CUDA
-* `L0_helpers.py`: required helper functions for both implementations, used in algorithm setup before iteration 
+* `L0_helpers.py`: required helper functions for both implementations, used in algorithm setup before iteration
+
+Referenced below and uploaded on the project git is a sample image that can be used for testing.
 
 ### Usage: ###
 Run `L0_serial.py` or `L0_parallel.py` with the `-h` or `--help` option to print a detailed help message.
@@ -69,7 +73,7 @@ Finally, the `-v` or `--verbose` option can be added to print verbose timings fo
     -subproblem 2: estimate S + 1
     --time: 0.028331 (s)
 
-As a note for setting `-k`, for the sample flowers image reference below, k = 2 requires ~22 iterations, k = 1.05 requires ~301 iterations, and k = 1.01 requres ~1441 iterations.
+As a note for setting `-k`, for the sample flowers image referenced below, k = 2 requires ~22 iterations, k = 1.05 requires ~301 iterations, and k = 1.01 requres ~1441 iterations.
 
 ### Sources: ###
 
